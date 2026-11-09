@@ -44,6 +44,10 @@ export const envSchema = z
     FEATURE_SHARE_LINKS: flag(true),
     FEATURE_FREE_CREDIT: flag(true),
 
+    // ── Image storage ───────────────────────────────────────────
+    /** "database" stores images in Postgres (no extra provider); "s3" uses S3/R2. */
+    STORAGE_DRIVER: z.enum(["database", "s3"]).default("database"),
+
     // ── Later milestones (optional until their feature ships) ───
     S3_ENDPOINT: optionalString,
     S3_REGION: optionalString,
@@ -73,12 +77,12 @@ export const envSchema = z
       e.S3_ACCESS_KEY_ID,
       e.S3_SECRET_ACCESS_KEY,
     ];
-    if (s3.some(Boolean) && !s3.every(Boolean)) {
+    if (e.STORAGE_DRIVER === "s3" && !s3.every(Boolean)) {
       ctx.addIssue({
         code: "custom",
-        path: ["S3_BUCKET"],
+        path: ["STORAGE_DRIVER"],
         message:
-          "S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together",
+          "STORAGE_DRIVER=s3 needs S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY",
       });
     }
     if (Boolean(e.AUTH_GOOGLE_ID) !== Boolean(e.AUTH_GOOGLE_SECRET)) {

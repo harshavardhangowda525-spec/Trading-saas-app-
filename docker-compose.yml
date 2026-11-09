@@ -17,29 +17,5 @@ services:
       timeout: 3s
       retries: 10
 
-  # Local S3-compatible storage (moto). In-memory: uploads are lost on restart.
-  s3:
-    image: motoserver/moto:5.2.5
-    restart: unless-stopped
-    ports:
-      - "9000:5000"
-
-  # Creates the dev bucket once S3 is up.
-  s3-init:
-    image: amazon/aws-cli:2.27.0
-    depends_on: [s3]
-    environment:
-      AWS_ACCESS_KEY_ID: test
-      AWS_SECRET_ACCESS_KEY: test
-      AWS_DEFAULT_REGION: us-east-1
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >
-        for i in 1 2 3 4 5 6 7 8 9 10; do
-          aws --endpoint-url http://s3:5000 s3 mb s3://chartsense-dev && exit 0;
-          sleep 2;
-        done; exit 1
-    restart: "no"
-
 volumes:
   chartsense-pg:

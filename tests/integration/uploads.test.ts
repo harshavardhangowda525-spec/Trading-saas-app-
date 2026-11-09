@@ -1,6 +1,8 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { getChartImageForUser, uploadChartImage } from "@/features/uploads/server/upload.service";
-import type { ObjectStorage } from "@/server/storage";
+import sharp from "sharp";
+import { DatabaseStorage, type ObjectStorage } from "@/server/storage";
+import { deriveFileUrlKey, verifyFileSignature } from "@/server/signed-url";
 import { makeImage } from "../helpers/images";
 import { createTestClient, createTestUser, testDbUrl } from "./db";
 
@@ -92,5 +94,44 @@ describe.skipIf(!testDbUrl)("chart uploads (integration)", () => {
       uploadChartImage(deps(storage), { userId: user.id, data: await makeImage(900, 600, "png") }),
     ).rejects.toMatchObject({ code: "STORAGE_UNAVAILABLE" });
     expect(await db.chartImage.count({ where: { userId: user.id } })).toBe(0);
+  });
+
+  describe("database storage driver", () => {
+    const urlKey = deriveFileUrlKey("z".repeat(40));
+
+    it("stores, signs, reads and deletes objects in Postgres", async () => {
+      const storage = new DatabaseStorage(db, urlKey);
+      const user = await createTestUser(db);
+      const input = await makeImage(1200, 800, "jpeg", { exif: true });
+
+      const view = await uploadChartImage(deps(storage), { userId: user.id, data: input });
+      const row = await db.chartImage.findUniqueOrThrow({ where: { id: view.id } });
+
+      const stored = await storage.read(row.storageKey);
+      expect(stored?.contentType).toBe("image/jpeg");
+      expect(stored?.size).toBe(row.bytes);
+      const meta = await sharp(Buffer.from(stored!.data)).metadata();
+      expect(meta.exif).toBeUndefined();
+
+      const url = new URL(view.url, "https://example.com");
+      expect(url.pathname.startsWith("/api/files/charts/")).toBe(true);
+      const keyFromUrl = url.pathname
+        .replace("/api/files/", "")
+        .split("/")
+        .map(decodeURIComponent)
+        .join("/");
+      expect(keyFromUrl).toBe(row.storageKey);
+      expect(
+        verifyFileSignature(
+          keyFromUrl,
+          url.searchParams.get("exp"),
+          url.searchParams.get("sig"),
+          urlKey,
+        ),
+      ).toBe("ok");
+
+      await storage.delete(row.storageKey);
+      expect(await storage.read(row.storageKey)).toBeNull();
+    });
   });
 });

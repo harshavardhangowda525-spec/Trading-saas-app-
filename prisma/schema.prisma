@@ -322,6 +322,16 @@ model ChartImage {
   @@index([userId, sha256])
 }
 
+/// Object storage inside Postgres (STORAGE_DRIVER=database). Keyed like an S3
+/// object so moving to R2/S3 later is a copy, not a code change.
+model StoredObject {
+  key         String   @id
+  contentType String
+  size        Int
+  data        Bytes
+  createdAt   DateTime @default(now())
+}
+
 /// Fixed-window rate-limit counters (Postgres fallback; swap for Upstash later).
 model RateLimit {
   key         String

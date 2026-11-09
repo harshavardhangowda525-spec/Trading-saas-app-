@@ -6,15 +6,52 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import type { PrismaClient } from "@/generated/prisma/client";
+import { db } from "./db";
 import { env } from "./env";
 import { AppError } from "./errors";
+import { createSignedFilePath, deriveFileUrlKey } from "./signed-url";
 
 /** Minimal storage surface the app needs. Lets tests swap in a fake. */
 export interface ObjectStorage {
   put(key: string, body: Buffer, contentType: string): Promise<void>;
-  /** Short-lived GET URL. The bucket itself is never public. */
+  /** Short-lived read URL (absolute for S3, same-origin path for the database driver). */
   signedReadUrl(key: string, ttlSeconds: number): Promise<string>;
   delete(key: string): Promise<void>;
+}
+
+export type StoredFile = { data: Uint8Array; contentType: string; size: number };
+
+/** Stores objects in Postgres (StoredObject table). No external provider needed. */
+export class DatabaseStorage implements ObjectStorage {
+  constructor(
+    private readonly client: PrismaClient,
+    private readonly urlKey: Buffer,
+  ) {}
+
+  async put(key: string, body: Buffer, contentType: string): Promise<void> {
+    const data = new Uint8Array(body);
+    await this.client.storedObject.upsert({
+      where: { key },
+      create: { key, contentType, size: data.byteLength, data },
+      update: { contentType, size: data.byteLength, data },
+    });
+  }
+
+  async signedReadUrl(key: string, ttlSeconds: number): Promise<string> {
+    return createSignedFilePath(key, ttlSeconds, this.urlKey);
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.client.storedObject.deleteMany({ where: { key } });
+  }
+
+  async read(key: string): Promise<StoredFile | null> {
+    return this.client.storedObject.findUnique({
+      where: { key },
+      select: { data: true, contentType: true, size: true },
+    });
+  }
 }
 
 export class S3Storage implements ObjectStorage {
@@ -48,13 +85,23 @@ export class S3Storage implements ObjectStorage {
 
 let cached: ObjectStorage | null = null;
 
-export function isStorageConfigured(): boolean {
-  return Boolean(env.S3_BUCKET);
+export function fileUrlKey(): Buffer {
+  return deriveFileUrlKey(env.AUTH_SECRET);
 }
 
-/** App-wide storage. Throws STORAGE_UNAVAILABLE when S3/R2 isn't configured. */
+export function isStorageConfigured(): boolean {
+  return env.STORAGE_DRIVER === "database" || Boolean(env.S3_BUCKET);
+}
+
+/** App-wide storage, chosen by STORAGE_DRIVER. */
 export function getStorage(): ObjectStorage {
   if (cached) return cached;
+
+  if (env.STORAGE_DRIVER === "database") {
+    cached = new DatabaseStorage(db, fileUrlKey());
+    return cached;
+  }
+
   if (
     !env.S3_ENDPOINT ||
     !env.S3_REGION ||

@@ -128,6 +128,17 @@ describe("parseEnv", () => {
     });
   });
 
+  it("stores images in the database by default", () => {
+    expect(parseEnv(base).STORAGE_DRIVER).toBe("database");
+  });
+
+  it("requires all S3 settings only when STORAGE_DRIVER=s3", () => {
+    expect(() => parseEnv({ ...base, STORAGE_DRIVER: "s3", S3_BUCKET: "b" })).toThrow(
+      /STORAGE_DRIVER/,
+    );
+    expect(parseEnv({ ...base, S3_BUCKET: "leftover" }).STORAGE_DRIVER).toBe("database");
+  });
+
   it("normalises admin emails", () => {
     const env = parseEnv({ ...base, ADMIN_EMAILS: " A@x.com, b@y.com ,," });
     expect(env.ADMIN_EMAILS).toEqual(["a@x.com", "b@y.com"]);
