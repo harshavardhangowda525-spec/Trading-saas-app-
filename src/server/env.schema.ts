@@ -96,6 +96,8 @@ export function parseEnv(raw: Record<string, string | undefined>): Env {
     if (value !== undefined && value.trim() !== "") cleaned[key] = value;
   }
   cleaned.APP_ENV ??= cleaned.VERCEL_ENV;
+  // Render exposes the service's public URL (https://<name>.onrender.com).
+  cleaned.NEXT_PUBLIC_APP_URL ??= cleaned.RENDER_EXTERNAL_URL;
   // Sensible default: Resend on deployed environments, console email locally.
   cleaned.EMAIL_TRANSPORT ??=
     cleaned.APP_ENV && cleaned.APP_ENV !== "development" ? "resend" : "console";

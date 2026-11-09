@@ -5,6 +5,8 @@ const MESSAGES: Record<string, string> = {
   AccountDeleted: "This account was deleted. Contact support if you think this is a mistake.",
   Verification: "That sign-in link has expired or was already used. Request a new one below.",
   OAuthAccountNotLinked: "This email is already linked to a different sign-in method.",
+  Configuration:
+    "We couldn't send your sign-in email right now. Please try again in a few minutes.",
   AccessDenied: "Sign-in was not allowed for this account.",
 };
 

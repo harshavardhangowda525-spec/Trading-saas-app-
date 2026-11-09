@@ -65,6 +65,13 @@ describe("parseEnv", () => {
     expect(env.EMAIL_TRANSPORT).toBe("console");
   });
 
+  it("falls back to Render's public URL for NEXT_PUBLIC_APP_URL", () => {
+    const { NEXT_PUBLIC_APP_URL: _omit, ...rest } = base;
+    void _omit;
+    const env = parseEnv({ ...rest, RENDER_EXTERNAL_URL: "https://chartsense.onrender.com" });
+    expect(env.NEXT_PUBLIC_APP_URL).toBe("https://chartsense.onrender.com");
+  });
+
   it("normalises admin emails", () => {
     const env = parseEnv({ ...base, ADMIN_EMAILS: " A@x.com, b@y.com ,," });
     expect(env.ADMIN_EMAILS).toEqual(["a@x.com", "b@y.com"]);

@@ -1,0 +1,54 @@
+# Render Blueprint — staging deployment on https://<name>.onrender.com
+# Dashboard: New → Blueprint → select this repo. Values marked `sync: false`
+# are prompted for on first creation. See README "Deploy to Render".
+services:
+  - type: web
+    name: chartsense
+    runtime: node
+    region: singapore # closest Render region to India
+    plan: free # sleeps after 15 min idle; upgrade to "starter" before real users
+    branch: claude/elegant-ptolemy-4nsk5i
+    autoDeploy: true
+    # Migrations run in the build because pre-deploy commands need a paid plan.
+    # --include=dev: prisma, typescript and tailwind are needed to build.
+    buildCommand: npm ci --include=dev && npx prisma migrate deploy && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      - key: APP_ENV
+        value: preview
+      # NEXT_PUBLIC_APP_URL is derived from Render's RENDER_EXTERNAL_URL.
+
+      # ── Database (Neon) ──
+      - key: DATABASE_URL
+        sync: false
+
+      # ── Auth ──
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: IP_HASH_SALT
+        generateValue: true
+      - key: ADMIN_EMAILS
+        sync: false
+
+      # ── Email (Resend test sender: delivers only to your Resend account email) ──
+      - key: EMAIL_TRANSPORT
+        value: resend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        value: "ChartSense <onboarding@resend.dev>"
+
+      # ── Credits & flags ──
+      - key: FREE_SIGNUP_CREDITS
+        value: "1"
+      - key: FEATURE_FREE_CREDIT
+        value: "true"
+      - key: FEATURE_SHARE_LINKS
+        value: "true"
+      - key: FEATURE_TRADE_LEVELS
+        value: "false"
