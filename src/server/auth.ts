@@ -5,6 +5,8 @@ import Google from "next-auth/providers/google";
 import Resend from "next-auth/providers/resend";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { isAdminEmail, isDisposableEmail, normalizeEmail } from "@/features/auth/email-rules";
+import { loginRequestContext } from "@/features/auth/server/login-context";
+import { createLoginCode, deriveLoginCodeKeys } from "@/features/auth/server/login-code.service";
 import { appConfig } from "./config";
 import { db } from "./db";
 import { sendMagicLinkEmail } from "./email";
@@ -18,7 +20,17 @@ const providers: Provider[] = [
     maxAge: 24 * 60 * 60,
     normalizeIdentifier: normalizeEmail,
     async sendVerificationRequest({ identifier, url }) {
-      await sendMagicLinkEmail({ to: identifier, url });
+      // When the request came from our sign-in form, also issue a 6-digit code
+      // bound to that browser (see features/auth/server/login-code.service.ts).
+      const ctx = loginRequestContext.getStore();
+      const code = ctx
+        ? await createLoginCode(db, deriveLoginCodeKeys(env.AUTH_SECRET), {
+            email: identifier,
+            nonce: ctx.nonce,
+            magicLink: url,
+          })
+        : null;
+      await sendMagicLinkEmail({ to: identifier, url, code });
     },
   }),
 ];

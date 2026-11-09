@@ -154,6 +154,26 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
+/// 6-digit sign-in code sent alongside the magic link. Bound to the browser that
+/// requested it (nonce cookie), short-lived, and locked after a few wrong tries.
+model LoginCode {
+  id         String    @id @default(cuid())
+  email      String
+  /// SHA-256 of the per-browser nonce cookie.
+  nonceHash  String
+  /// HMAC of the code; the code itself is never stored.
+  codeHash   String
+  /// The magic-link URL, AES-GCM encrypted; opened server-side once the code checks out.
+  linkCipher String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([nonceHash, createdAt])
+  @@index([expiresAt])
+}
+
 /// Audit trail of every terms version each user accepted (legal evidence).
 model TermsAcceptance {
   id         String   @id @default(cuid())

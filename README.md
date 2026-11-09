@@ -137,6 +137,19 @@ Conventions: business logic lives in `features/*/server/*.service.ts`, never in 
 Every API error has the shape `{ error: { code, message } }` (see `src/server/errors.ts`), and
 state-changing API routes reject cross-origin requests (`src/server/http.ts`).
 
+## Sign-in
+
+- **Google** (when `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET` are set).
+- **Email:** one email contains both a magic link and a **6-digit code**.
+  - The **link** signs in whichever device opens it (valid 24 h, single use).
+  - The **code** is for signing in on a different device from the one you read email on
+    (e.g. request on desktop, read the code on your phone). It only works in the browser that
+    requested it (bound by an httpOnly nonce cookie), expires after 10 minutes, is single use,
+    and locks after 5 wrong attempts. Only an HMAC of the code and an AES-GCM-encrypted copy of
+    the link are stored (`LoginCode` table).
+  - Sign-in emails are limited to 5/hour per address and 30/hour per IP.
+- Sessions are per browser and last 30 days.
+
 ## Uploads (M2)
 
 `/app/new` → choose (tap, drag & drop, or paste with Ctrl/⌘+V), optionally crop, upload.
@@ -228,11 +241,24 @@ Nothing to set up: images are stored in the Neon database (`STORAGE_DRIVER=datab
 Every push to the configured branch redeploys automatically. Migrations run during the build
 (Render's pre-deploy command requires a paid plan).
 
-### 4. Google sign-in (later)
+### 4. Google sign-in
 
-Create an OAuth client in Google Cloud Console with redirect URI
-`https://<name>.onrender.com/api/auth/callback/google`, then add `AUTH_GOOGLE_ID` and
-`AUTH_GOOGLE_SECRET` in the Render service's Environment tab.
+1. console.cloud.google.com → project picker → **New project** → name `ChartSense` → Create.
+2. Menu → **APIs & Services → OAuth consent screen** (may be called **Google Auth Platform**) →
+   **Get started**: app name `ChartSense`, your email as support email, Audience **External**,
+   your email as contact → agree → Create.
+3. **Audience → Test users → Add users** → your Gmail address(es). While the app is in "Testing",
+   only these accounts can use Google sign-in (fine for staging).
+4. **Clients → Create client** → type **Web application**, name `ChartSense Render`:
+   - Authorized JavaScript origins: `https://<name>.onrender.com` and `http://localhost:3000`
+   - Authorized redirect URIs: `https://<name>.onrender.com/api/auth/callback/google` and
+     `http://localhost:3000/api/auth/callback/google`
+5. Create → copy the **Client ID** and **Client secret**.
+6. Render → Environment: `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` (both, or neither) → Save,
+   rebuild, and deploy. The "Continue with Google" button appears automatically.
+
+Google accounts with the same email as an existing magic-link account sign in to that same
+account (Google verifies email ownership).
 
 ### Troubleshooting
 
