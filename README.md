@@ -234,6 +234,11 @@ Create an OAuth client in Google Cloud Console with redirect URI
 
 ### Troubleshooting
 
+- **Sign-in email link opens `localhost`**: a localhost `AUTH_URL`, `NEXTAUTH_URL` or
+  `NEXT_PUBLIC_APP_URL` was set on Render (often from importing a local `.env`). The app now
+  ignores localhost values on deployed servers, logs `[config] Ignoring …`, and uses Render's
+  public URL. Delete those entries in the Environment tab anyway. None of them are needed on Render.
+
 - **Deploy fails at "Invalid environment variables"**: the log lists exactly which setting is
   missing or malformed.
 - **Health check fails**: usually a wrong `DATABASE_URL`; check `sslmode=require` is present.

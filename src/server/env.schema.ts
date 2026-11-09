@@ -95,6 +95,13 @@ export const envSchema = z
         message: "required when EMAIL_TRANSPORT=resend",
       });
     }
+    if (e.APP_ENV !== "development" && !e.NEXT_PUBLIC_APP_URL.startsWith("https://")) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["NEXT_PUBLIC_APP_URL"],
+        message: "must be the public https:// URL of the site on deployed environments",
+      });
+    }
     if (e.APP_ENV === "production" && e.EMAIL_TRANSPORT === "console") {
       ctx.addIssue({
         code: "custom",
@@ -106,15 +113,42 @@ export const envSchema = z
 
 export type Env = z.infer<typeof envSchema>;
 
+function isLocalUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname;
+    return ["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1"].includes(host);
+  } catch {
+    return false;
+  }
+}
+
 /** Parses a raw env record. Empty strings are treated as unset. */
 export function parseEnv(raw: Record<string, string | undefined>): Env {
   const cleaned: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw)) {
     if (value !== undefined && value.trim() !== "") cleaned[key] = value;
   }
-  cleaned.APP_ENV ??= cleaned.VERCEL_ENV;
-  // Render exposes the service's public URL (https://<name>.onrender.com).
-  cleaned.NEXT_PUBLIC_APP_URL ??= cleaned.RENDER_EXTERNAL_URL;
+  // Deployment environment: explicit APP_ENV, else Vercel's, else "preview" on Render.
+  cleaned.APP_ENV ??= cleaned.VERCEL_ENV ?? (cleaned.RENDER === "true" ? "preview" : undefined);
+  const deployed = cleaned.APP_ENV !== undefined && cleaned.APP_ENV !== "development";
+
+  // A localhost URL on a deployed server is always a config mistake (e.g. a local
+  // .env imported into the host). Using it would put localhost in magic links.
+  if (deployed) {
+    for (const key of ["NEXT_PUBLIC_APP_URL", "AUTH_URL", "NEXTAUTH_URL"]) {
+      const value = cleaned[key];
+      if (value && isLocalUrl(value)) {
+        console.warn(
+          `[config] Ignoring ${key}=${value}: localhost is not valid on a deployed server.`,
+        );
+        delete cleaned[key];
+      }
+    }
+  }
+  // Canonical public URL. Render exposes RENDER_EXTERNAL_URL (https://<name>.onrender.com).
+  cleaned.NEXT_PUBLIC_APP_URL ??=
+    cleaned.AUTH_URL ?? cleaned.NEXTAUTH_URL ?? cleaned.RENDER_EXTERNAL_URL;
+
   // Sensible default: Resend on deployed environments, console email locally.
   cleaned.EMAIL_TRANSPORT ??=
     cleaned.APP_ENV && cleaned.APP_ENV !== "development" ? "resend" : "console";

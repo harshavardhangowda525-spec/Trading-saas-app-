@@ -8,6 +8,8 @@ const base = {
   IP_HASH_SALT: "salt-salt",
 };
 
+const deployedBase = { ...base, NEXT_PUBLIC_APP_URL: "https://chartsense.example.com" };
+
 describe("parseEnv", () => {
   it("applies defaults for flags and credits", () => {
     const env = parseEnv(base);
@@ -43,21 +45,21 @@ describe("parseEnv", () => {
   });
 
   it("defaults to Resend on deployed environments and requires its key", () => {
-    expect(() => parseEnv({ ...base, APP_ENV: "production" })).toThrow(/RESEND_API_KEY/);
-    const env = parseEnv({ ...base, APP_ENV: "production", RESEND_API_KEY: "re_123" });
+    expect(() => parseEnv({ ...deployedBase, APP_ENV: "production" })).toThrow(/RESEND_API_KEY/);
+    const env = parseEnv({ ...deployedBase, APP_ENV: "production", RESEND_API_KEY: "re_123" });
     expect(env.EMAIL_TRANSPORT).toBe("resend");
   });
 
   it("reads the deployment environment from VERCEL_ENV", () => {
-    const env = parseEnv({ ...base, VERCEL_ENV: "preview", RESEND_API_KEY: "re_123" });
+    const env = parseEnv({ ...deployedBase, VERCEL_ENV: "preview", RESEND_API_KEY: "re_123" });
     expect(env.APP_ENV).toBe("preview");
     expect(env.EMAIL_TRANSPORT).toBe("resend");
   });
 
   it("forbids the console email transport in production", () => {
-    expect(() => parseEnv({ ...base, APP_ENV: "production", EMAIL_TRANSPORT: "console" })).toThrow(
-      /EMAIL_TRANSPORT/,
-    );
+    expect(() =>
+      parseEnv({ ...deployedBase, APP_ENV: "production", EMAIL_TRANSPORT: "console" }),
+    ).toThrow(/EMAIL_TRANSPORT/);
   });
 
   it("allows a local production build (NODE_ENV=production) with console email", () => {
@@ -70,6 +72,60 @@ describe("parseEnv", () => {
     void _omit;
     const env = parseEnv({ ...rest, RENDER_EXTERNAL_URL: "https://chartsense.onrender.com" });
     expect(env.NEXT_PUBLIC_APP_URL).toBe("https://chartsense.onrender.com");
+  });
+
+  describe("public URL on deployed servers", () => {
+    const render = {
+      ...base,
+      RENDER: "true",
+      RENDER_EXTERNAL_URL: "https://chartsense.onrender.com",
+      RESEND_API_KEY: "re_123",
+    };
+
+    it("treats Render as a deployed (preview) environment", () => {
+      expect(parseEnv(render).APP_ENV).toBe("preview");
+    });
+
+    it("ignores a localhost NEXT_PUBLIC_APP_URL and uses Render's URL", () => {
+      expect(parseEnv(render).NEXT_PUBLIC_APP_URL).toBe("https://chartsense.onrender.com");
+    });
+
+    it("ignores a localhost AUTH_URL / NEXTAUTH_URL (the magic-link bug)", () => {
+      const { NEXT_PUBLIC_APP_URL: _omit, ...rest } = render;
+      void _omit;
+      const env = parseEnv({
+        ...rest,
+        AUTH_URL: "http://localhost:3000",
+        NEXTAUTH_URL: "http://127.0.0.1:3000",
+      });
+      expect(env.NEXT_PUBLIC_APP_URL).toBe("https://chartsense.onrender.com");
+    });
+
+    it("keeps an explicit public URL (custom domain) over Render's default", () => {
+      const env = parseEnv({ ...render, NEXT_PUBLIC_APP_URL: "https://chartsense.in" });
+      expect(env.NEXT_PUBLIC_APP_URL).toBe("https://chartsense.in");
+    });
+
+    it("fails fast when the only URL configured is localhost", () => {
+      expect(() => parseEnv({ ...base, APP_ENV: "preview", RESEND_API_KEY: "re_123" })).toThrow(
+        /NEXT_PUBLIC_APP_URL/,
+      );
+    });
+
+    it("requires https on deployed environments", () => {
+      expect(() =>
+        parseEnv({
+          ...base,
+          APP_ENV: "preview",
+          RESEND_API_KEY: "re_123",
+          NEXT_PUBLIC_APP_URL: "http://chartsense.example.com",
+        }),
+      ).toThrow(/https/);
+    });
+
+    it("still allows localhost in local development", () => {
+      expect(parseEnv(base).NEXT_PUBLIC_APP_URL).toBe("http://localhost:3000");
+    });
   });
 
   it("normalises admin emails", () => {
