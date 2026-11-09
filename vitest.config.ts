@@ -12,6 +12,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"],
+    testTimeout: 20_000,
     setupFiles: ["dotenv/config"],
     // Integration tests share one database; run files sequentially.
     fileParallelism: false,

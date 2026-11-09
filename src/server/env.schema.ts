@@ -50,6 +50,8 @@ export const envSchema = z
     S3_BUCKET: optionalString,
     S3_ACCESS_KEY_ID: optionalString,
     S3_SECRET_ACCESS_KEY: optionalString,
+    /** true for local emulators (moto/MinIO); R2 and AWS work either way. */
+    S3_FORCE_PATH_STYLE: flag(false),
     SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().default(300),
     ANTHROPIC_API_KEY: optionalString,
     AI_MODEL_ANALYSIS: optionalString,
@@ -64,6 +66,21 @@ export const envSchema = z
     SENTRY_DSN: optionalString,
   })
   .superRefine((e, ctx) => {
+    const s3 = [
+      e.S3_ENDPOINT,
+      e.S3_REGION,
+      e.S3_BUCKET,
+      e.S3_ACCESS_KEY_ID,
+      e.S3_SECRET_ACCESS_KEY,
+    ];
+    if (s3.some(Boolean) && !s3.every(Boolean)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["S3_BUCKET"],
+        message:
+          "S3_ENDPOINT, S3_REGION, S3_BUCKET, S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together",
+      });
+    }
     if (Boolean(e.AUTH_GOOGLE_ID) !== Boolean(e.AUTH_GOOGLE_SECRET)) {
       ctx.addIssue({
         code: "custom",

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Logo } from "@/components/layout/logo";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { MobileAnalyzeBar } from "@/components/layout/mobile-analyze-bar";
 import { UserMenu } from "@/components/layout/user-menu";
 import { Button } from "@/components/ui/button";
 import { requireOnboardedUser } from "@/features/auth/server/current-user";
@@ -37,12 +38,7 @@ export default async function AppLayout({ children }: LayoutProps<"/app">) {
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 pt-6 pb-28 sm:pb-10">{children}</main>
       <SiteFooter />
 
-      {/* Sticky mobile CTA (Section 5.2) */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 p-3 backdrop-blur sm:hidden">
-        <Button asChild size="lg" className="h-12 w-full">
-          <Link href="/app/new">Analyze a chart</Link>
-        </Button>
-      </div>
+      <MobileAnalyzeBar />
     </>
   );
 }

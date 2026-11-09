@@ -1,25 +1,26 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { NewAnalysisForm } from "@/features/analysis/components/new-analysis-form";
+import { isStorageConfigured } from "@/server/storage";
 
 export const metadata: Metadata = { title: "New analysis" };
 
-// Placeholder so navigation works end to end. Upload UI ships in M2.
 export default function NewAnalysisPage() {
   return (
-    <Card className="mx-auto max-w-lg">
-      <CardHeader>
-        <CardTitle>Chart upload is coming next</CardTitle>
-        <CardDescription>
-          Uploading and analysing charts arrives in the next update. Your credits are safe.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Button asChild variant="outline">
-          <Link href="/app">Back to dashboard</Link>
-        </Button>
-      </CardContent>
-    </Card>
+    <div className="mx-auto flex max-w-2xl flex-col gap-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">New analysis</h1>
+        <p className="text-sm text-muted-foreground">
+          Upload a chart screenshot. We remove hidden photo data (like location) before storing it
+          privately.
+        </p>
+      </div>
+      {isStorageConfigured() ? (
+        <NewAnalysisForm />
+      ) : (
+        <p role="alert" className="rounded-2xl border bg-muted/50 p-5 text-sm">
+          Chart uploads aren&apos;t available right now. Please try again later.
+        </p>
+      )}
+    </div>
   );
 }
