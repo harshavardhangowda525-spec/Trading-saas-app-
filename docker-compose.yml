@@ -1,0 +1,21 @@
+# Local Postgres for development: `docker compose up -d`
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chartsense
+      POSTGRES_PASSWORD: chartsense
+      POSTGRES_DB: chartsense
+    ports:
+      - "5432:5432"
+    volumes:
+      - chartsense-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chartsense"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  chartsense-pg:

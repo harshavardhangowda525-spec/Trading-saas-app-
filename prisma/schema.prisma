@@ -1,0 +1,361 @@
+// ChartSense data model. See README "Data model" for invariants.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────── Enums ─────────────
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum CreditReason {
+  SIGNUP_BONUS
+  PURCHASE
+  ANALYSIS
+  REFUND
+  ADMIN_ADJUST
+}
+
+enum PaymentStatus {
+  CREATED
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum AnalysisStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  UNREADABLE
+}
+
+enum Verdict {
+  ENTER_LONG
+  ENTER_SHORT
+  WAIT
+  AVOID
+}
+
+enum Confidence {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TradingStyle {
+  SCALP
+  INTRADAY
+  SWING
+  POSITIONAL
+}
+
+enum OutcomeResult {
+  PLAYED_OUT
+  PARTIAL
+  AGAINST
+  NOT_TAKEN
+}
+
+enum ReportReason {
+  MISREAD_CHART
+  WRONG_LEVELS
+  BAD_REASONING
+  INAPPROPRIATE_LANGUAGE
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  REVIEWED
+}
+
+enum AiCallKind {
+  READABILITY
+  ANALYSIS
+}
+
+// ───────────── Users & Auth (Auth.js adapter models) ─────────────
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  emailVerified   DateTime?
+  name            String?
+  image           String?
+  role            Role      @default(USER)
+  /// CACHE ONLY. Changed exclusively inside the same transaction that appends a CreditLedger row.
+  creditBalance   Int       @default(0)
+  /// Latest accepted terms (denormalized from TermsAcceptance).
+  termsAcceptedAt DateTime?
+  termsVersion    String?
+  /// Soft delete; a purge job hard-deletes personal data later.
+  deletedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  accounts         Account[]
+  sessions         Session[]
+  termsAcceptances TermsAcceptance[]
+  ledger           CreditLedger[]
+  payments         Payment[]
+  analyses         Analysis[]
+  outcomes         Outcome[]
+  reports          Report[]          @relation("ReportAuthor")
+  reviewedReports  Report[]          @relation("ReportReviewer")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+/// Audit trail of every terms version each user accepted (legal evidence).
+model TermsAcceptance {
+  id         String   @id @default(cuid())
+  userId     String
+  version    String
+  acceptedAt DateTime @default(now())
+  /// Salted SHA-256 of the client IP, never the raw IP.
+  ipHash     String?
+  userAgent  String?  @db.VarChar(512)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, version])
+  @@index([userId])
+}
+
+// ───────────── Credits ─────────────
+
+/// Append-only. Rows are never updated or deleted by application code.
+model CreditLedger {
+  id           String       @id @default(cuid())
+  userId       String
+  /// Positive = credit added, negative = credit spent.
+  delta        Int
+  /// User balance immediately after this entry (audit/debug).
+  balanceAfter Int
+  reason       CreditReason
+  /// analysisId | paymentId | userId (signup bonus). Null for admin adjustments.
+  referenceId  String?
+  note         String?
+  /// Admin user id for ADMIN_ADJUST.
+  createdById  String?
+  createdAt    DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Idempotency: one SIGNUP_BONUS per user, one PURCHASE per payment,
+  // one ANALYSIS debit and at most one REFUND per analysis.
+  @@unique([reason, referenceId])
+  @@index([userId, createdAt])
+}
+
+// ───────────── Payments ─────────────
+
+model Payment {
+  id                String        @id @default(cuid())
+  /// Nullable so payment/tax records survive account deletion (anonymised).
+  userId            String?
+  razorpayOrderId   String        @unique
+  razorpayPaymentId String?       @unique
+  amountPaise       Int
+  currency          String        @default("INR")
+  packId            String
+  /// Snapshot of credits granted at order time.
+  credits           Int
+  status            PaymentStatus @default(CREATED)
+  failureReason     String?
+  invoiceNumber     String?       @unique
+  paidAt            DateTime?
+  refundedAt        DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+}
+
+/// Raw webhook log. Unique eventId gives event-level idempotency.
+model WebhookEvent {
+  id          String    @id @default(cuid())
+  provider    String
+  eventId     String    @unique
+  eventType   String
+  payload     Json
+  processedAt DateTime?
+  error       String?
+  receivedAt  DateTime  @default(now())
+}
+
+// ───────────── Analysis ─────────────
+
+model Analysis {
+  id             String  @id @default(cuid())
+  userId         String
+  /// Client-generated per submit; prevents double charging on retries.
+  idempotencyKey String
+  /// Storage object key. Null after the image is purged.
+  imageKey       String?
+  /// SHA-256 of the normalized image.
+  imageHash      String
+  imageMime      String?
+  imageWidth     Int?
+  imageHeight    Int?
+
+  inputInstrument String?       @db.VarChar(64)
+  inputTimeframe  String?       @db.VarChar(16)
+  inputStyle      TradingStyle?
+  inputQuestion   String?       @db.VarChar(200)
+
+  readabilityJson Json?
+  /// User-facing payload (feature-flag stripped).
+  outputJson      Json?
+  /// Unmodified model output. Admin only — never send to clients.
+  rawOutputJson   Json?
+
+  verdict             Verdict?
+  confidence          Confidence?
+  detectedInstrument  String?
+  detectedTimeframe   String?
+  priceLevelsReliable Boolean?
+
+  promptVersion   String?
+  model           String?
+  /// Totals across all AI calls for this analysis (see AiCall for detail).
+  inputTokens     Int      @default(0)
+  outputTokens    Int      @default(0)
+  costEstimateUsd Decimal  @default(0) @db.Decimal(10, 6)
+  latencyMs       Int?
+
+  status           AnalysisStatus @default(PENDING)
+  failureCode      String?
+  flaggedForReview Boolean        @default(false)
+  creditCharged    Boolean        @default(false)
+  /// Set when served from the same-image 10-minute dedupe cache.
+  cachedFromId     String?
+
+  userNote   String?   @db.VarChar(2000)
+  shareToken String?   @unique
+  sharedAt   DateTime?
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aiCalls AiCall[]
+  outcome Outcome?
+  reports Report[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([userId, createdAt])
+  @@index([imageHash, userId])
+  @@index([userId, verdict])
+  @@index([status])
+}
+
+/// One row per model call (readability, analysis, retries).
+model AiCall {
+  id              String     @id @default(cuid())
+  analysisId      String
+  kind            AiCallKind
+  attempt         Int        @default(1)
+  model           String
+  promptVersion   String
+  inputTokens     Int        @default(0)
+  outputTokens    Int        @default(0)
+  costEstimateUsd Decimal    @default(0) @db.Decimal(10, 6)
+  latencyMs       Int
+  success         Boolean
+  errorCode       String?
+  createdAt       DateTime   @default(now())
+
+  analysis Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  @@index([analysisId])
+  @@index([createdAt])
+}
+
+// ───────────── Feedback ─────────────
+
+model Outcome {
+  id         String        @id @default(cuid())
+  /// One outcome per analysis; editable by the owner.
+  analysisId String        @unique
+  userId     String
+  result     OutcomeResult
+  note       String?       @db.VarChar(1000)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  analysis Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([result])
+}
+
+model Report {
+  id           String       @id @default(cuid())
+  analysisId   String
+  userId       String
+  reason       ReportReason
+  note         String?      @db.VarChar(1000)
+  status       ReportStatus @default(OPEN)
+  adminNote    String?
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime     @default(now())
+
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  user       User     @relation("ReportAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy User?    @relation("ReportReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([analysisId])
+}
